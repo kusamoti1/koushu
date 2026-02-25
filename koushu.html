@@ -33,6 +33,9 @@
         .btn-active:active { transform: scale(0.96); transition: transform 0.1s; }
         .goro-box { background-color: #fdf2f8; border: 2px solid #fbcfe8; border-radius: 0.5rem; padding: 1rem; margin-top: 1rem; }
         .reason-box { background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 0.75rem; margin-top: 0.75rem; font-size: 0.875rem; line-height: 1.6;}
+        .law-box { background-color: #f0fdf4; border-left: 4px solid #22c55e; padding: 0.75rem; margin-top: 0.75rem; font-size: 0.875rem; line-height: 1.6; }
+        .trap-box { background-color: #fff1f2; border-left: 4px solid #f43f5e; padding: 0.75rem; margin-top: 0.75rem; font-size: 0.875rem; line-height: 1.6; }
+        .tip-box { background-color: #fffbeb; border: 2px solid #fcd34d; border-radius: 0.5rem; padding: 0.75rem; margin-top: 0.75rem; font-size: 0.875rem; line-height: 1.6; }
         .pop-in { animation: popIn 0.2s ease-out forwards; }
         @keyframes popIn { 0% { transform: scale(0.95); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
         .bottom-nav { 
@@ -380,6 +383,12 @@
             questionMaster.push({ id: `q${qId++}`, c: cat, r: rank, t: qFalse, isTrue: false, cv: needsCv, e: exp });
         });
 
+        // ★ 軽量化2: O(n)の線形探索をO(1)のMapに変換（ノート画面の高速化）
+        const questionMap = new Map(questionMaster.map(q => [q.id, q]));
+
+        // ★ 軽量化3: KaTeX描画結果をキャッシュ（同じ数式を何度も再描画しない）
+        const katexCache = new Map();
+
         function getQDetails(q) {
             const rankHtml = q.r === 'S' ? '<span class="text-red-600 font-bold">👑 超頻出 S</span>' : q.r === 'A' ? '<span class="text-orange-500 font-bold">⭐ 頻出 A</span>' : '<span class="text-blue-500 font-bold">📘 基本 B</span>';
             const catStr = q.c === 'law' ? '法令' : q.c === 'sec' ? '保安管理' : '学識';
@@ -388,13 +397,26 @@
             return { rankHtml, catStr, catCol, expHtml };
         }
 
-        function renderMath(elementId) {
-            if (typeof renderMathInElement !== 'function') return; 
+        const katexDelimiters = [
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '\\[', right: '\\]', display: true}
+        ];
+
+        function renderMath(elementId, cacheKey) {
+            if (typeof renderMathInElement !== 'function') return;
             const el = els[elementId];
             if (!el) return;
-            if (el.innerHTML.includes('$') || el.innerHTML.includes('\\(')) {
-                renderMathInElement(el, { delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}, {left: '\\(', right: '\\)', display: false}, {left: '\\[', right: '\\]', display: true}], throwOnError: false });
+            const html = el.innerHTML;
+            if (!html.includes('$') && !html.includes('\\(')) return;
+            // キャッシュが存在すれば即座に適用（再描画なし）
+            if (cacheKey && katexCache.has(cacheKey)) {
+                el.innerHTML = katexCache.get(cacheKey);
+                return;
             }
+            renderMathInElement(el, { delimiters: katexDelimiters, throwOnError: false });
+            if (cacheKey) katexCache.set(cacheKey, el.innerHTML);
         }
 
         let userProgress = JSON.parse(localStorage.getItem('userProgress')) || {};
@@ -542,7 +564,7 @@
             }
             
             if(els['main-content']) els['main-content'].scrollTop = 0;
-            renderMath('std-text'); 
+            renderMath('std-text', q.cv ? `${q.id}_text` : null);
         }
 
         function checkStandardAnswer(userAnswer) {
@@ -566,7 +588,7 @@
 
             els['std-result-mark'].innerHTML = isRight ? '<span class="text-rose-500"><i class="fa-regular fa-circle"></i></span>' : '<span class="text-blue-500"><i class="fa-solid fa-xmark"></i></span>';
             els['std-explanation-text'].innerHTML = details.expHtml;
-            renderMath('std-explanation-view'); 
+            renderMath('std-explanation-view', q.cv ? `${q.id}_exp` : null);
             
             setTimeout(() => { if(els['main-content']) els['main-content'].scrollBy({ top: 300, behavior: 'smooth' }); }, 50);
         }
@@ -603,7 +625,7 @@
 
             let htmlBuilder = [];
             bookmarkedIds.forEach(id => {
-                const q = questionMaster.find(m => m.id === id);
+                const q = questionMap.get(id);
                 if(!q) return;
                 const details = getQDetails(q);
                 htmlBuilder.push(`
